@@ -1,0 +1,35 @@
+name: OpenWeather pollution history
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First day to fill, YYYY-MM-DD (leave empty to only heal the last 3 days)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 4 * * *"   # once a day: heal the last 3 days
+
+jobs:
+  ow-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run OpenWeather history
+        run: |
+          if [ -n "${{ github.event.inputs.start }}" ]; then
+            python -m agentweather.ow_history --start "${{ github.event.inputs.start }}"
+          else
+            python -m agentweather.ow_history --days 3
+          fi
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+          HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
