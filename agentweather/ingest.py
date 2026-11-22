@@ -7,6 +7,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -44,6 +45,20 @@ def build_row(now: datetime | None = None) -> pd.DataFrame:
     return df
 
 
+def _insert_with_retry(fg, df: pd.DataFrame, attempts: int = 4, wait_s: float = 20.0) -> None:
+    """Hopsworks storage (HopsFS) sometimes times out; retry before giving up."""
+    for attempt in range(1, attempts + 1):
+        try:
+            fg.insert(df, write_options={"wait_for_job": False})
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Hopsworks insert failed (attempt %d/%d): %s",
+                        attempt, attempts, type(exc).__name__)
+            if attempt == attempts:
+                raise
+            time.sleep(wait_s * attempt)
+
+
 def write_to_hopsworks(df: pd.DataFrame) -> None:
     import hopsworks  # imported here so --dry-run works without the package
 
@@ -61,7 +76,7 @@ def write_to_hopsworks(df: pd.DataFrame) -> None:
         event_time="ts",
         online_enabled=False,
     )
-    fg.insert(df, write_options={"wait_for_job": False})
+    _insert_with_retry(fg, df)
 
 
 def main() -> int:
