@@ -1,0 +1,39 @@
+name: Feature pipeline
+
+on:
+  workflow_run:
+    workflows: ["Hourly ingestion"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Rebuild ALL history (use once after a big backfill)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: features
+  cancel-in-progress: false
+
+jobs:
+  features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run feature pipeline
+        run: |
+          if [ "${{ github.event.inputs.full }}" = "true" ]; then
+            python -m agentweather.feature_pipeline --full
+          else
+            python -m agentweather.feature_pipeline --days 3
+          fi
+        env:
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+          HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
