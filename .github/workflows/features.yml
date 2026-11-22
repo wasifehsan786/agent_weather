@@ -17,6 +17,8 @@ concurrency:
 
 jobs:
   features:
+    # When started by the ingestion workflow, run only if ingestion succeeded.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
