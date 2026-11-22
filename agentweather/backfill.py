@@ -26,7 +26,11 @@ from .sources import RAW_COLUMNS
 
 log = logging.getLogger("agentweather.backfill")
 
-CHUNK_DAYS = 90
+CHUNK_DAYS = 30          # small requests are faster and more reliable
+FETCH_TIMEOUT_S = 90     # Open-Meteo can be slow for history
+FETCH_ATTEMPTS = 5
+FETCH_BACKOFF_S = 10
+FLUSH_ROWS = 2000        # each Hopsworks insert has a fixed cost, so write in big batches
 
 WEATHER_MAP = {
     "temperature_2m": "om_temp_c",
@@ -74,27 +78,28 @@ def parse_history(weather: dict, air: dict) -> pd.DataFrame:
     return df[["city", "ts"] + RAW_COLUMNS + ["ow_ok", "aq_ok", "om_ok"]]
 
 
-def fetch_history(start: date, end: date) -> pd.DataFrame:
-    """Fetch [start, end] in chunks. Open-Meteo returns hourly data in UTC."""
-    frames = []
+def iter_chunks(start: date, end: date):
     cursor = start
     while cursor <= end:
         chunk_end = min(cursor + timedelta(days=CHUNK_DAYS - 1), end)
-        loc = {"latitude": config.CITY.lat, "longitude": config.CITY.lon,
-               "timezone": "UTC", "start_date": cursor.isoformat(),
-               "end_date": chunk_end.isoformat()}
-        weather = get_json(
-            "https://historical-forecast-api.open-meteo.com/v1/forecast",
-            {**loc, "wind_speed_unit": "ms", "hourly": ",".join(WEATHER_MAP)},
-        )
-        air = get_json(
-            "https://air-quality-api.open-meteo.com/v1/air-quality",
-            {**loc, "hourly": ",".join(AIR_MAP)},
-        )
-        frames.append(parse_history(weather, air))
-        log.info("Fetched %s to %s (%d hours)", cursor, chunk_end, len(frames[-1]))
+        yield cursor, chunk_end
         cursor = chunk_end + timedelta(days=1)
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def fetch_chunk(first: date, last: date) -> pd.DataFrame:
+    """Fetch one date range. Open-Meteo returns hourly data in UTC."""
+    loc = {"latitude": config.CITY.lat, "longitude": config.CITY.lon,
+           "timezone": "UTC", "start_date": first.isoformat(), "end_date": last.isoformat()}
+    slow = {"timeout": FETCH_TIMEOUT_S, "attempts": FETCH_ATTEMPTS, "backoff": FETCH_BACKOFF_S}
+    weather = get_json(
+        "https://historical-forecast-api.open-meteo.com/v1/forecast",
+        {**loc, "wind_speed_unit": "ms", "hourly": ",".join(WEATHER_MAP)}, **slow,
+    )
+    air = get_json(
+        "https://air-quality-api.open-meteo.com/v1/air-quality",
+        {**loc, "hourly": ",".join(AIR_MAP)}, **slow,
+    )
+    return parse_history(weather, air)
 
 
 def keep_missing_hours(history: pd.DataFrame, existing_ts: pd.Series,
@@ -149,12 +154,9 @@ def main() -> int:
     end = datetime.now(timezone.utc).date()
     start = date.fromisoformat(args.start) if args.start else end - timedelta(days=args.days)
 
-    history = fetch_history(start, end)
-    if history.empty:
-        log.error("No data returned.")
-        return 1
-
     if args.dry_run:
+        first, last = next(iter_chunks(start, end))
+        history = fetch_chunk(first, last)
         log.info("Dry run: %d hours from %s to %s", len(history),
                  history["ts"].min(), history["ts"].max())
         print(history.head(3).T.to_string())
@@ -163,12 +165,39 @@ def main() -> int:
     from .ingest import _insert_with_retry
 
     fg = _feature_group()
-    new_rows = keep_missing_hours(history, existing_hours(fg))
-    log.info("%d of %d hours are missing and will be inserted", len(new_rows), len(history))
-    for i in range(0, len(new_rows), 2000):
-        _insert_with_retry(fg, new_rows.iloc[i:i + 2000])
-        log.info("Inserted rows %d-%d", i, min(i + 2000, len(new_rows)))
-    return 0
+    existing = existing_hours(fg)
+    buffer: list[pd.DataFrame] = []
+    buffered = inserted = 0
+    failed: list[str] = []
+
+    def flush() -> None:
+        nonlocal buffer, buffered, inserted
+        if not buffer:
+            return
+        batch = pd.concat(buffer, ignore_index=True)
+        _insert_with_retry(fg, batch)
+        inserted += len(batch)
+        log.info("Inserted %d rows (total %d)", len(batch), inserted)
+        buffer, buffered = [], 0
+
+    for first, last in iter_chunks(start, end):
+        try:
+            history = fetch_chunk(first, last)
+        except Exception as exc:  # noqa: BLE001 - skip a bad chunk, keep the rest
+            log.error("Chunk %s to %s failed: %s", first, last, type(exc).__name__)
+            failed.append(f"{first}..{last}")
+            continue
+        new_rows = keep_missing_hours(history, existing)
+        log.info("%s to %s: %d of %d hours are missing", first, last, len(new_rows), len(history))
+        if len(new_rows):
+            buffer.append(new_rows)
+            buffered += len(new_rows)
+        if buffered >= FLUSH_ROWS:
+            flush()
+    flush()
+
+    log.info("Done. Inserted %d rows. Failed chunks: %s", inserted, failed or "none")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
