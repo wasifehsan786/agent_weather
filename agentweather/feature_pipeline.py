@@ -26,13 +26,9 @@ BATCH_ROWS = 12000   # each write is slow and gets slower per call, so use few b
 
 
 def _login():
-    import hopsworks
+    from .hopsworks_login import login
 
-    return hopsworks.login(
-        api_key_value=os.environ["HOPSWORKS_API_KEY"],
-        project=os.environ.get("HOPSWORKS_PROJECT") or None,
-        host=os.environ.get("HOPSWORKS_HOST") or None,
-    ).get_feature_store()
+    return login().get_feature_store()
 
 
 def summarise(feats: pd.DataFrame) -> None:

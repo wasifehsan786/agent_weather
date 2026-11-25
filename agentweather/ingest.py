@@ -60,14 +60,9 @@ def _insert_with_retry(fg, df: pd.DataFrame, attempts: int = 4, wait_s: float = 
 
 
 def write_to_hopsworks(df: pd.DataFrame) -> None:
-    import hopsworks  # imported here so --dry-run works without the package
+    from .hopsworks_login import login
 
-    project = hopsworks.login(
-        api_key_value=os.environ["HOPSWORKS_API_KEY"],
-        project=os.environ.get("HOPSWORKS_PROJECT") or None,
-        host=os.environ.get("HOPSWORKS_HOST") or None,
-    )
-    fs = project.get_feature_store()
+    fs = login().get_feature_store()
     fg = fs.get_or_create_feature_group(
         name=config.RAW_FG_NAME,
         version=config.RAW_FG_VERSION,

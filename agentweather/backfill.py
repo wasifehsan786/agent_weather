@@ -113,14 +113,9 @@ def keep_missing_hours(history: pd.DataFrame, existing_ts: pd.Series,
 
 
 def _feature_group():
-    import hopsworks
+    from .hopsworks_login import login
 
-    project = hopsworks.login(
-        api_key_value=os.environ["HOPSWORKS_API_KEY"],
-        project=os.environ.get("HOPSWORKS_PROJECT") or None,
-        host=os.environ.get("HOPSWORKS_HOST") or None,
-    )
-    fs = project.get_feature_store()
+    fs = login().get_feature_store()
     return fs.get_or_create_feature_group(
         name=config.RAW_FG_NAME, version=config.RAW_FG_VERSION,
         description="Raw hourly readings per source (OpenWeather, AQICN, Open-Meteo).",
