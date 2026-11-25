@@ -1,0 +1,27 @@
+name: EDA report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-eda.txt
+      - name: Run EDA
+        run: python -m agentweather.eda
+        env:
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+          HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
+      - name: Save the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eda-report
+          path: eda_output/
