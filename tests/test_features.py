@@ -76,3 +76,14 @@ def test_columns_are_stable_between_runs():
     a = list(features.build_features(raw).columns)
     b = list(features.build_features(raw.iloc[:120]).columns)
     assert a == b
+
+
+def test_air_quality_ignores_other_sources():
+    """AQI and PM come from Open-Meteo only, so history and live hours use the same definition."""
+    raw = make_raw()
+    raw.loc[10, ["aq_aqi", "ow_pm2_5", "ow_pm10"]] = [9.0, 999.0, 999.0]
+    feats = features.build_features(raw).set_index("ts")
+    t10 = pd.Timestamp("2026-11-01", tz="UTC") + pd.Timedelta(hours=10)
+    assert feats.loc[t10, "aqi"] == raw.loc[10, "om_us_aqi"]
+    assert feats.loc[t10, "pm2_5"] == raw.loc[10, "om_pm2_5"]
+    assert feats.loc[t10, "pm10"] == raw.loc[10, "om_pm10"]

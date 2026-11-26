@@ -27,18 +27,22 @@ ROLL_MEAN = (6, 24)
 ROLL_STD = (24,)
 
 # Source priority per metric (first one that has a value wins).
-# AQICN station AQI is preferred; Open-Meteo's model AQI is the fallback. Both are US-AQI scale.
-# AQICN's pollutant numbers are AQI sub-indices, not ug/m3, so they are NOT mixed in here.
+# Air quality (aqi, pm2_5, pm10) comes from Open-Meteo ONLY. Reason (EDA, 25 Nov 2026): the
+# sources disagree a lot (PM2.5 mean 99 OpenWeather vs 38 Open-Meteo; AQI 53 AQICN vs 127
+# Open-Meteo on live hours), and history exists only for Open-Meteo/OpenWeather. One source for
+# history AND live keeps the target consistent. AQICN and OpenWeather pollution stay in the raw
+# table for cross-checks, alerts and the report. Weather metrics keep OpenWeather first for now;
+# they are to be re-checked when more live hours exist.
 PRIORITY = {
-    "aqi": ["aq_aqi", "om_us_aqi"],
+    "aqi": ["om_us_aqi"],
     "temp_c": ["ow_temp_c", "om_temp_c"],
     "precip_mm": ["ow_rain_1h_mm", "om_precip_mm"],
     "humidity_pct": ["ow_humidity_pct", "om_humidity_pct"],
     "uv_index": ["om_uv_index"],
     "wind_speed_ms": ["ow_wind_speed_ms", "om_wind_speed_ms"],
     "wind_deg": ["ow_wind_deg", "om_wind_deg"],
-    "pm2_5": ["ow_pm2_5", "om_pm2_5"],
-    "pm10": ["ow_pm10", "om_pm10"],
+    "pm2_5": ["om_pm2_5"],
+    "pm10": ["om_pm10"],
 }
 
 # Metrics that get lags/rolling features, and metrics that we forecast.
