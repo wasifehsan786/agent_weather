@@ -2,6 +2,8 @@ name: Training
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "23 1 * * *"   # once a day, 06:23 Islamabad time
 
 jobs:
   train:
@@ -14,8 +16,8 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements-ml.txt
-      - name: Train and evaluate (no registry yet)
-        run: python -m agentweather.train --no-register
+      - name: Train, evaluate, register if better
+        run: python -m agentweather.train
         env:
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
@@ -25,3 +27,4 @@ jobs:
         with:
           name: train-report
           path: train_output/
+          retention-days: 30

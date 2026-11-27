@@ -128,7 +128,7 @@ def train_all(df: pd.DataFrame, val_days: int = VAL_DAYS):
             models[(metric, family)] = model
             log.info("%-14s %-13s RMSE %.3f  MAE %.3f  R2 %.3f  skill vs naive %+.1f%%",
                      metric, family, s["rmse"], s["mae"], s["r2"], 100 * s["skill"])
-    return pd.DataFrame(rows).round(4), models, val, cols
+    return pd.DataFrame(rows), models, val, cols   # not rounded: the registry compares exact scores
 
 
 def best_per_metric(results: pd.DataFrame) -> dict:
@@ -143,9 +143,13 @@ def model_name(metric: str) -> str:
     return f"aw_{metric}_24h"
 
 
-def should_replace(new_rmse: float, current_rmse: float | None) -> bool:
-    """Replace only when the new model is strictly better (or there is no current model)."""
-    return current_rmse is None or new_rmse < current_rmse
+MIN_GAIN = 0.005   # the new model must be at least 0.5% better; ignores noise, avoids churn
+
+
+def should_replace(new_rmse: float, current_rmse: float | None,
+                   min_gain: float = MIN_GAIN) -> bool:
+    """Replace only when the new model is clearly better (or there is no current model)."""
+    return current_rmse is None or new_rmse < current_rmse * (1 - min_gain)
 
 
 def current_model_rmse(mr, metric: str, val: pd.DataFrame):
@@ -228,9 +232,10 @@ def main() -> int:
     results, models, val, cols = train_all(df, args.val_days)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    results.to_csv(out / "metrics.csv", index=False)
-    (out / "metrics.md").write_text(results.to_string(index=False), encoding="utf-8")
-    print(results.to_string(index=False))
+    shown = results.round(4)
+    shown.to_csv(out / "metrics.csv", index=False)
+    (out / "metrics.md").write_text(shown.to_string(index=False), encoding="utf-8")
+    print(shown.to_string(index=False))
 
     if mr is not None:
         decisions = register_all(mr, results, models, val, cols)

@@ -60,8 +60,57 @@ def test_best_per_metric_ignores_naive():
     assert train.best_per_metric(res) == {"a": "random_forest"}
 
 
-def test_replace_only_when_strictly_better():
+def test_replace_only_when_clearly_better():
     assert train.should_replace(1.0, None) is True
     assert train.should_replace(0.9, 1.0) is True
     assert train.should_replace(1.0, 1.0) is False
+    assert train.should_replace(0.999, 1.0) is False   # 0.1% better is noise
     assert train.should_replace(1.1, 1.0) is False
+
+
+class _FakeEntry:
+    def __init__(self, store, name, metrics):
+        self.store, self.name, self.metrics = store, name, metrics
+
+    def save(self, folder):
+        import shutil
+        import tempfile
+        keep = tempfile.mkdtemp()
+        shutil.copytree(folder, keep, dirs_exist_ok=True)
+        self.path = keep
+        self.store.setdefault(self.name, []).append(self)
+
+    def download(self):
+        return self.path
+
+
+class _FakeRegistry:
+    """Stands in for the Hopsworks model registry in tests."""
+
+    def __init__(self):
+        self.store = {}
+        registry = self
+
+        class _Sk:
+            def create_model(self, name, metrics, description, input_example):
+                return _FakeEntry(registry.store, name, metrics)
+
+        self.sklearn = _Sk()
+
+    def get_best_model(self, name, metric, direction):
+        entries = self.store.get(name)
+        if not entries:
+            return None
+        return min(entries, key=lambda e: e.metrics[metric])
+
+
+def test_registry_first_run_registers_second_run_keeps(feats):
+    results, models, val, cols = train.train_all(feats, val_days=10)
+    mr = _FakeRegistry()
+    first = train.register_all(mr, results, models, val, cols)
+    assert all(d["registered"] for d in first)
+    assert len(mr.store) == len(train.METRICS)
+    # the same models again are not strictly better, so nothing new is saved
+    second = train.register_all(mr, results, models, val, cols)
+    assert not any(d["registered"] for d in second)
+    assert all(len(v) == 1 for v in mr.store.values())
